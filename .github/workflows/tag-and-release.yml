@@ -79,3 +79,8 @@ jobs:
           artifacts: "*.gem, CHANGELOG.md"
           bodyFile: "REL-BODY.md"
           token: ${{ steps.app-token.outputs.token }}
+          # An immutable release seals on publish, so assets have to land while
+          # it is still a draft. This creates a draft, uploads, then publishes.
+          immutableCreate: true
+          # Upload failures were warnings, so a release could publish empty and green.
+          artifactErrorsFailBuild: true
