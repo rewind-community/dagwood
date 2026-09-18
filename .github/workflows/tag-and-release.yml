@@ -73,6 +73,7 @@ jobs:
           VERSION=${{steps.get_version.outputs.version}}; awk "/## \[$VERSION\]/{flag=1;next}/## \[/{flag=0}flag" CHANGELOG.md > REL-BODY.md
 
       - name: Create Release
+        id: create_release
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
         with:
           tag: ${{steps.get_version.outputs.version_tag}}
@@ -86,15 +87,25 @@ jobs:
           artifactErrorsFailBuild: true
 
       - name: Delete stranded draft release
-        if: failure()
+        if: ${{ failure() && steps.create_release.outcome == 'failure' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           TAG: ${{steps.get_version.outputs.version_tag}}
         run: |
-          # A failed upload leaves the draft behind, and re-runs stack more of them.
-          gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
-            --jq '.[] | select(.draft and .tag_name == env.TAG) | .id' |
-          while read -r id; do
+          set -o pipefail
+          # The releases list lags creation by a second or two, so poll before giving up.
+          ids=""
+          for _ in 1 2 3 4 5; do
+            ids=$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+              --jq '.[] | select(.draft and .tag_name == env.TAG) | .id') || ids=""
+            [ -n "$ids" ] && break
+            sleep 3
+          done
+          if [ -z "$ids" ]; then
+            echo "No draft release for ${TAG}; nothing to clean up."
+            exit 0
+          fi
+          for id in $ids; do
             echo "Deleting stranded draft ${id} for ${TAG}"
             gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
           done
